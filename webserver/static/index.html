@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrendRadar Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #06080d;
+            --bg-card: #111827;
+            --border-color: #1a2340;
+            --border-hover: #2d3f6a;
+            --accent-cyan: #00e5ff;
+            --accent-purple: #8b5cf6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+        body {
+            background-color: var(--bg-primary);
+            color: #e5e7eb;
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        }
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            transition: border-color 0.2s;
+        }
+        .card:hover {
+            border-color: var(--border-hover);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+        .btn-secondary {
+            background-color: var(--border-color);
+            color: #e5e7eb;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            transition: background-color 0.2s;
+        }
+        .btn-secondary:hover {
+            background-color: var(--border-hover);
+        }
+        .sidebar-link {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            color: #9ca3af;
+            transition: all 0.2s;
+        }
+        .sidebar-link:hover, .sidebar-link.active {
+            background-color: var(--border-color);
+            color: var(--accent-cyan);
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-success { background-color: var(--success); }
+        .status-failed { background-color: var(--danger); }
+        .status-pending { background-color: #6b7280; }
+        .log-output {
+            background-color: #000;
+            color: #10b981;
+            font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-y: auto;
+            max-height: 400px;
+        }
+        .log-error { color: var(--danger); }
+        .log-warn { color: var(--warning); }
+        .timeline-bar {
+            height: 24px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: white;
+            font-weight: 500;
+        }
+        .code-editor {
+            font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            background-color: #0d1117;
+            color: #e6edf3;
+        }
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--border-hover);
+        }
+    </style>
+</head>
+<body x-data="app()" x-init="init()">
+    <!-- 登录弹窗 -->
+    <div x-show="authRequired && !authenticated" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="card p-8 w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4 text-center">🔐 管理员登录</h2>
+            <p class="text-gray-400 mb-6 text-center">请输入访问令牌</p>
+            <input 
+                type="password" 
+                x-model="token"
+                @keyup.enter="login()"
+                placeholder="Bearer Token"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:border-cyan-500"
+            >
+            <button @click="login()" class="btn-primary w-full">登录</button>
+            <p x-show="authError" x-text="authError" class="text-red-500 mt-3 text-center"></p>
+        </div>
+    </div>
+
+    <!-- 主布局 -->
+    <div class="flex h-screen">
+        <!-- 侧边栏 -->
+        <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
+            <div class="p-4 border-b border-gray-800">
+                <h1 class="text-xl font-bold flex items-center gap-2">
+                    <span class="text-cyan-400">⚡</span>
+                    TrendRadar
+                </h1>
+                <p class="text-xs text-gray-500 mt-1">管理仪表盘</p>
+            </div>
+            
+            <nav class="flex-1 p-4 space-y-1">
+                <a href="#/" @click.prevent="navigate('')" 
+                   :class="{'active': currentPage === ''}" class="sidebar-link">
+                    <span>📊</span> 仪表盘
+                </a>
+                <a href="#/news" @click.prevent="navigate('news')" 
+                   :class="{'active': currentPage === 'news'}" class="sidebar-link">
+                    <span>📰</span> 新闻浏览
+                </a>
+                <a href="#/rss" @click.prevent="navigate('rss')" 
+                   :class="{'active': currentPage === 'rss'}" class="sidebar-link">
+                    <span>📡</span> RSS 订阅
+                </a>
+                <a href="#/config" @click.prevent="navigate('config')" 
+                   :class="{'active': currentPage === 'config'}" class="sidebar-link">
+                    <span>⚙️</span> 配置管理
+                </a>
+                <a href="#/schedule" @click.prevent="navigate('schedule')" 
+                   :class="{'active': currentPage === 'schedule'}" class="sidebar-link">
+                    <span>⏰</span> 调度监控
+                </a>
+                <a href="#/actions" @click.prevent="navigate('actions')" 
+                   :class="{'active': currentPage === 'actions'}" class="sidebar-link">
+                    <span>🚀</span> 手动操作
+                </a>
+            </nav>
+            
+            <div class="p-4 border-t border-gray-800">
+                <a href="#/system" @click.prevent="navigate('system')" 
+                   :class="{'active': currentPage === 'system'}" class="sidebar-link text-sm">
+                    <span>ℹ️</span> 系统信息
+                </a>
+                <div class="mt-4 text-xs text-gray-600">
+                    v<span x-text="version"></span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-auto">
+            <!-- 顶部栏 -->
+            <header class="bg-gray-900/50 border-b border-gray-800 px-6 py-4 flex justify-between items-center sticky top-0 z-10">
+                <h2 x-text="pageTitle" class="text-xl font-semibold"></h2>
+                <div class="flex items-center gap-4">
+                    <span x-show="authEnabled" class="text-xs text-gray-500 flex items-center gap-1">
+                        <span class="status-dot status-success"></span>
+                        已认证
+                    </span>
+                    <span x-text="currentTime" class="text-sm text-gray-400 font-mono"></span>
+                </div>
+            </header>
+
+            <!-- 页面内容 -->
+            <div class="p-6">
+                <!-- 仪表盘 -->
+                <div x-show="currentPage === ''" x-cloak>
+                    <div x-html="renderDashboard()"></div>
+                </div>
+
+                <!-- 新闻浏览 -->
+                <div x-show="currentPage === 'news'" x-cloak>
+                    <div x-html="renderNews()"></div>
+                </div>
+
+                <!-- RSS 订阅 -->
+                <div x-show="currentPage === 'rss'" x-cloak>
+                    <div x-html="renderRSS()"></div>
+                </div>
+
+                <!-- 配置管理 -->
+                <div x-show="currentPage === 'config'" x-cloak>
+                    <div x-html="renderConfig()"></div>
+                </div>
+
+                <!-- 调度监控 -->
+                <div x-show="currentPage === 'schedule'" x-cloak>
+                    <div x-html="renderSchedule()"></div>
+                </div>
+
+                <!-- 手动操作 -->
+                <div x-show="currentPage === 'actions'" x-cloak>
+                    <div x-html="renderActions()"></div>
+                </div>
+
+                <!-- 系统信息 -->
+                <div x-show="currentPage === 'system'" x-cloak>
+                    <div x-html="renderSystem()"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function app() {
+            return {
+                // 状态
+                currentPage: '',
+                currentTime: '',
+                version: '6.7.0',
+                authRequired: false,
+                authEnabled: false,
+                authenticated: false,
+                token: localStorage.getItem('admin_token') || '',
+                authError: '',
+                
+                // 数据
+                dashboardData: null,
+                newsData: { items: [], total: 0, page: 1, platforms: [] },
+                rssData: { items: [], total: 0, page: 1, feeds: [] },
+                scheduleData: null,
+                systemData: null,
+                configData: {},
+                
+                // 筛选状态
+                newsFilter: { date: '', platform: '', keyword: '', sort_by: 'rank' },
+                rssFilter: { date: '', feed: '', keyword: '' },
+                
+                // 操作状态
+                runningActions: {},
+                logs: {},
+                
+                // 配置编辑
+                activeConfigTab: 'config_yaml',
+                configContent: '',
+                configParsed: null,
+                configBackups: [],
+                
+                // 时间刷新
+                timeInterval: null,
+                
+                get pageTitle() {
+                    const titles = {
+                        '': '仪表盘',
+                        'news': '新闻浏览',
+                        'rss': 'RSS 订阅',
+                        'config': '配置管理',
+                        'schedule': '调度监控',
+                        'actions': '手动操作',
+                        'system': '系统信息'
+                    };
+                    return titles[this.currentPage] || '仪表盘';
+                },
+                
+                async init() {
+                    // 检查认证
+                    await this.checkAuth();
+                    
+                    // 路由处理
+                    this.handleHash();
+                    window.addEventListener('hashchange', () => this.handleHash());
+                    
+                    // 时间更新
+                    this.updateTime();
+                    this.timeInterval = setInterval(() => this.updateTime(), 1000);
+                    
+                    // 加载初始数据
+                    if (!this.authRequired || this.authenticated) {
+                        this.loadPageData();
+                    }
+                },
+                
+                async checkAuth() {
+                    try {
+                        const res = await this.apiCall('/api/system/info');
+                        this.authEnabled = res.data?.auth_enabled || false;
+                        this.authRequired = this.authEnabled && !this.token;
+                        this.authenticated = !this.authRequired;
+                    } catch (e) {
+                        this.authRequired = true;
+                    }
+                },
+                
+                async login() {
+                    if (!this.token) return;
+                    
+                    // 测试 token
+                    try {
+                        const res = await fetch('/api/system/info', {
+                            headers: { 'Authorization': `Bearer ${this.token}` }
+                        });
+                        if (res.ok) {
+                            localStorage.setItem('admin_token', this.token);
+                            this.authenticated = true;
+                            this.authRequired = false;
+                            this.authError = '';
+                            this.loadPageData();
+                        } else {
+                            this.authError = '无效的访问令牌';
+                        }
+                    } catch (e) {
+                        this.authError = '连接失败';
+                    }
+                },
+                
+                async apiCall(url, options = {}) {
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    };
+                    
+                    if (this.token) {
+                        headers['Authorization'] = `Bearer ${this.token}`;
+                    }
+                    
+                    const res = await fetch(url, { ...options, headers });
+                    if (res.status === 401) {
+                        this.authRequired = true;
+                        this.authenticated = false;
+                        throw new Error('Unauthorized');
+                    }
+                    return res.json();
+                },
+                
+                handleHash() {
+                    const hash = window.location.hash.replace('#/', '') || '';
+                    this.currentPage = hash.split('?')[0];
+                    this.loadPageData();
+                },
+                
+                navigate(page) {
+                    window.location.hash = page ? `#/${page}` : '#/';
+                },
+                
+                updateTime() {
+                    const now = new Date();
+                    this.currentTime = now.toLocaleTimeString('zh-CN', { hour12: false });
+                },
+                
+                loadPageData() {
+                    switch (this.currentPage) {
+                        case '':
+                            this.loadDashboard();
+                            break;
+                        case 'news':
+                            this.loadNews();
+                            break;
+                        case 'rss':
+                            this.loadRSS();
+                            break;
+                        case 'config':
+                            this.loadConfig();
+                            break;
+                        case 'schedule':
+                            this.loadSchedule();
+                            break;
+                        case 'system':
+                            this.loadSystem();
+                            break;
+                    }
+                },
+                
+                // ========== API 调用 ==========
+                async loadDashboard() {
+                    try {
+                        const [dashboard, chart] = await Promise.all([
+                            this.apiCall('/api/dashboard'),
+                            this.apiCall('/api/dashboard/chart')
+                        ]);
+                        
+                        if (dashboard.success) {
+                            this.dashboardData = dashboard.data;
+                        }
+                        
+                        // 渲染图表
+                        this.$nextTick(() => {
+                            if (chart.success) {
+                                this.renderChart(chart.data);
+                            }
+                        });
+                    } catch (e) {
+                        console.error('Failed to load dashboard:', e);
+                    }
+                },
+                
+                async loadNews() {
+                    try {
+                        const params = new URLSearchParams({
+                            page: this.newsData.page,
+                            per_page: 50
+                        });
+                        if (this.newsFilter.platform) params.append('platform', this.newsFilter.platform);
+                        if (this.newsFilter.keyword) params.append('keyword', this.newsFilter.keyword);
+                        if (this.newsFilter.sort_by) params.append('sort_by', this.newsFilter.sort_by);
+                        
+                        const res = await this.apiCall(`/api/news?${params}`);
+                        if (res.success) {
+                            this.newsData = res.data;
+                        }
+                    } catch (e) {
+                        console.error('Failed to load news:', e);
+                    }
+                },
+                
+                async loadRSS() {
+                    try {
+                        const params = new URLSearchParams({
+                            page: this.rssData.page,
+                            per_page: 50
+                        });
+                        if (this.rssFilter.feed) params.append('feed', this.rssFilter.feed);
+                        if (this.rssFilter.keyword) params.append('keyword', this.rssFilter.keyword);
+                        
+                        const res = await this.apiCall(`/api/rss?${params}`);
+                        if (res.success) {
+                            this.rssData = res.data;
+                        }
+                    } catch (e) {
+                        console.error('Failed to load RSS:', e);
+                    }
+                },
+                
+                async loadConfig() {
+                    try {
+                        const res = await this.apiCall(`/api/config/${this.activeConfigTab}?parsed=true`);
+                        if (res.success) {
+                            this.configContent = res.data.content;
+                            this.configParsed = res.data.parsed;
+                        }
+                        
+                        // 加载备份列表
+                        const backups = await this.apiCall(`/api/config/${this.activeConfigTab}/backups`);
+                        if (backups.success) {
+                            this.configBackups = backups.data.backups;
+                        }
+                    } catch (e) {
+                        console.error('Failed to load config:', e);
+                    }
+                },
+                
+                async loadSchedule() {
+                    try {
+                        const res = await this.apiCall('/api/schedule');
+                        if (res.success) {
+                            this.scheduleData = res.data;
+                        }
+                    } catch (e) {
+                        console.error('Failed to load schedule:', e);
+                    }
+                },
+                
+                async loadSystem() {
+                    try {
+                        const res = await this.apiCall('/api/system/info');
+                        if (res.success) {
+                            this.systemData = res.data;
+                            this.version = res.data.version;
+                        }
+                    } catch (e) {
+                        console.error('Failed to load system info:', e);
+                    }
+                },
+                
+                // ========== 渲染方法 ==========
+                renderDashboard() {
+                    if (!this.dashboardData) return '<div class="text-center py-12 text-gray-500">加载中...</div>';
+                    
+                    const { today, platforms, top_news } = this.dashboardData;
+                    
+                    return `
+                        <!-- 统计卡片 -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <div class="card p-4">
+                                <div class="text-sm text-gray-400 mb-1">今日采集条数</div>
+                                <div class="text-3xl font-bold text-cyan-400">${today.news_count}</div>
+                            </div>
+                            <div class="card p-4">
+                                <div class="text-sm text-gray-400 mb-1">今日 RSS 条数</div>
+                                <div class="text-3xl font-bold text-purple-400">${today.rss_count}</div>
+                            </div>
+                            <div class="card p-4">
+                                <div class="text-sm text-gray-400 mb-1">最近采集时间</div>
+                                <div class="text-xl font-semibold">${today.last_crawl ? new Date(today.last_crawl).toLocaleString('zh-CN') : '-'}</div>
+                            </div>
+                            <div class="card p-4">
+                                <div class="text-sm text-gray-400 mb-1">数据库文件数</div>
+                                <div class="text-xl font-semibold">
+                                    新闻: ${today.db_count.news} / RSS: ${today.db_count.rss}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 平台状态 -->
+                        <div class="card p-4 mb-6">
+                            <h3 class="text-lg font-semibold mb-4">平台采集状态</h3>
+                            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                                ${platforms.map(p => `
+                                    <div class="flex items-center gap-2 p-2 bg-gray-800/50 rounded-lg">
+                                        <span class="status-dot ${p.status === 'success' ? 'status-success' : p.status === 'failed' ? 'status-failed' : 'status-pending'}"></span>
+                                        <span class="text-sm truncate">${p.name}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        
+                        <!-- 趋势图 -->
+                        <div class="card p-4 mb-6">
+                            <h3 class="text-lg font-semibold mb-4">近 7 天采集量趋势</h3>
+                            <canvas id="trendChart" height="100"></canvas>
+                        </div>
+                        
+                        <!-- Top 10 热榜 -->
+                        <div class="card p-4">
+                            <h3 class="text-lg font-semibold mb-4">今日热榜 Top 10</h3>
+                            <div class="space-y-2">
+                                ${top_news.map((n, i) => `
+                                    <div class="flex items-center gap-3 p-2 hover:bg-gray-800/50 rounded-lg transition-colors">
+                                        <span class="w-6 h-6 flex items-center justify-center rounded ${i < 3 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-700 text-gray-400'} font-bold text-sm">
+                                            ${n.rank}
+                                        </span>
+                                        <span class="text-xs text-gray-500 w-20 truncate">${n.platform}</span>
+                                        <a href="${n.url}" target="_blank" class="flex-1 truncate hover:text-cyan-400 transition-colors">
+                                            ${n.title}
+                                        </a>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderChart(chartData) {
+                    const ctx = document.getElementById('trendChart');
+                    if (!ctx || !chartData) return;
+                    
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: chartData.news.map(d => d.date.slice(5)),
+                            datasets: [
+                                {
+                                    label: '新闻热榜',
+                                    data: chartData.news.map(d => d.count),
+                                    borderColor: '#00e5ff',
+                                    backgroundColor: 'rgba(0, 229, 255, 0.1)',
+                                    tension: 0.4,
+                                    fill: true
+                                },
+                                {
+                                    label: 'RSS',
+                                    data: chartData.rss.map(d => d.count),
+                                    borderColor: '#8b5cf6',
+                                    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                                    tension: 0.4,
+                                    fill: true
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: {
+                                    labels: { color: '#9ca3af' }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    grid: { color: '#1f2937' },
+                                    ticks: { color: '#9ca3af' }
+                                },
+                                y: {
+                                    grid: { color: '#1f2937' },
+                                    ticks: { color: '#9ca3af' }
+                                }
+                            }
+                        }
+                    });
+                },
+                
+                renderNews() {
+                    return `
+                        <div class="card p-4">
+                            <!-- 筛选器 -->
+                            <div class="flex flex-wrap gap-4 mb-4">
+                                <select x-model="newsFilter.platform" @change="newsData.page = 1; loadNews()" 
+                                        class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+                                    <option value="">全部平台</option>
+                                    <template x-for="p in newsData.platforms" :key="p.id">
+                                        <option :value="p.id" x-text="p.name"></option>
+                                    </template>
+                                </select>
+                                <select x-model="newsFilter.sort_by" @change="loadNews()"
+                                        class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+                                    <option value="rank">按排名</option>
+                                    <option value="crawl_count">按出现次数</option>
+                                    <option value="first_crawl_time">按首次出现</option>
+                                </select>
+                                <input type="text" x-model="newsFilter.keyword" @keyup.enter="newsData.page = 1; loadNews()"
+                                       placeholder="搜索标题..." 
+                                       class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 flex-1 min-w-[200px]">
+                                <button @click="newsData.page = 1; loadNews()" class="btn-primary">搜索</button>
+                            </div>
+                            
+                            <!-- 表格 -->
+                            <div class="overflow-x-auto">
+                                <table class="w-full">
+                                    <thead>
+                                        <tr class="text-left text-gray-400 text-sm border-b border-gray-700">
+                                            <th class="pb-3">排名</th>
+                                            <th class="pb-3">平台</th>
+                                            <th class="pb-3">标题</th>
+                                            <th class="pb-3">首次出现</th>
+                                            <th class="pb-3">出现次数</th>
+                                            <th class="pb-3">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="text-sm">
+                                        <template x-for="item in newsData.items" :key="item.id">
+                                            <tr class="border-b border-gray-800 hover:bg-gray-800/30">
+                                                <td class="py-3">
+                                                    <span class="inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold"
+                                                          :class="item.rank <= 3 ? 'bg-yellow-500/20 text-yellow-400' : item.rank <= 10 ? 'bg-cyan-500/20 text-cyan-400' : 'bg-gray-700 text-gray-400'"
+                                                          x-text="item.rank"></span>
+                                                </td>
+                                                <td class="py-3 text-gray-400" x-text="item.platform"></td>
+                                                <td class="py-3">
+                                                    <a :href="item.url" target="_blank" class="hover:text-cyan-400 transition-colors" x-text="item.title"></a>
+                                                </td>
+                                                <td class="py-3 text-gray-400" x-text="new Date(item.first_crawl_time).toLocaleString('zh-CN')"></td>
+                                                <td class="py-3">
+                                                    <span class="px-2 py-1 bg-gray-700 rounded text-xs" x-text="item.crawl_count"></span>
+                                                </td>
+                                                <td class="py-3">
+                                                    <button @click="showRankHistory(item.id)" class="text-cyan-400 hover:text-cyan-300 text-xs">
+                                                        排名历史
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- 分页 -->
+                            <div class="flex justify-center gap-2 mt-4">
+                                <button @click="newsData.page = Math.max(1, newsData.page - 1); loadNews()" 
+                                        :disabled="newsData.page <= 1"
+                                        class="btn-secondary disabled:opacity-50">上一页</button>
+                                <span class="px-3 py-2 text-gray-400">
+                                    第 <span x-text="newsData.page"></span> / <span x-text="newsData.total_pages || 1"></span> 页
+                                </span>
+                                <button @click="newsData.page = Math.min(newsData.total_pages || 1, newsData.page + 1); loadNews()"
+                                        :disabled="newsData.page >= (newsData.total_pages || 1)"
+                                        class="btn-secondary disabled:opacity-50">下一页</button>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderRSS() {
+                    return `
+                        <div class="space-y-4">
+                            <!-- RSS 源状态卡片 -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" x-show="rssData.feeds.length">
+                                <template x-for="feed in rssData.feeds" :key="feed.id">
+                                    <div class="card p-4">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <span class="font-medium truncate" x-text="feed.name"></span>
+                                            <span class="status-dot" :class="feed.status === 'success' ? 'status-success' : 'status-failed'"></span>
+                                        </div>
+                                        <div class="text-xs text-gray-400">
+                                            <div>文章数: <span x-text="feed.count"></span></div>
+                                            <div class="truncate">最近采集: <span x-text="feed.last_fetch ? new Date(feed.last_fetch).toLocaleString('zh-CN') : '-'"></span></div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            
+                            <!-- 文章列表 -->
+                            <div class="card p-4">
+                                <div class="flex flex-wrap gap-4 mb-4">
+                                    <select x-model="rssFilter.feed" @change="rssData.page = 1; loadRSS()"
+                                            class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+                                        <option value="">全部源</option>
+                                        <template x-for="f in rssData.feeds" :key="f.id">
+                                            <option :value="f.id" x-text="f.name"></option>
+                                        </template>
+                                    </select>
+                                    <input type="text" x-model="rssFilter.keyword" @keyup.enter="rssData.page = 1; loadRSS()"
+                                           placeholder="搜索标题或摘要..."
+                                           class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 flex-1 min-w-[200px]">
+                                    <button @click="rssData.page = 1; loadRSS()" class="btn-primary">搜索</button>
+                                </div>
+                                
+                                <div class="space-y-3">
+                                    <template x-for="item in rssData.items" :key="item.id">
+                                        <div class="p-3 bg-gray-800/30 rounded-lg hover:bg-gray-800/50 transition-colors">
+                                            <div class="flex items-start gap-3">
+                                                <span class="px-2 py-1 bg-gray-700 rounded text-xs shrink-0" x-text="item.feed"></span>
+                                                <div class="flex-1 min-w-0">
+                                                    <a :href="item.url" target="_blank" class="font-medium hover:text-cyan-400 transition-colors block truncate" x-text="item.title"></a>
+                                                    <div class="text-xs text-gray-400 mt-1 flex gap-3">
+                                                        <span x-show="item.author" x-text="'作者: ' + item.author"></span>
+                                                        <span x-text="new Date(item.published_at).toLocaleString('zh-CN')"></span>
+                                                    </div>
+                                                    <p x-show="item.summary" class="text-sm text-gray-500 mt-2 line-clamp-2" x-text="item.summary"></p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                
+                                <!-- 分页 -->
+                                <div class="flex justify-center gap-2 mt-4">
+                                    <button @click="rssData.page = Math.max(1, rssData.page - 1); loadRSS()"
+                                            :disabled="rssData.page <= 1"
+                                            class="btn-secondary disabled:opacity-50">上一页</button>
+                                    <span class="px-3 py-2 text-gray-400">
+                                        第 <span x-text="rssData.page"></span> / <span x-text="rssData.total_pages || 1"></span> 页
+                                    </span>
+                                    <button @click="rssData.page = Math.min(rssData.total_pages || 1, rssData.page + 1); loadRSS()"
+                                            :disabled="rssData.page >= (rssData.total_pages || 1)"
+                                            class="btn-secondary disabled:opacity-50">下一页</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderConfig() {
+                    return `
+                        <div class="space-y-4">
+                            <!-- Tab 切换 -->
+                            <div class="flex flex-wrap gap-2 border-b border-gray-800 pb-2">
+                                ${[
+                                    {key: 'config_yaml', label: 'config.yaml'},
+                                    {key: 'timeline_yaml', label: 'timeline.yaml'},
+                                    {key: 'frequency_words', label: 'frequency_words.txt'},
+                                    {key: 'ai_interests', label: 'ai_interests.txt'},
+                                    {key: 'ai_analysis_prompt', label: 'AI分析提示词'},
+                                    {key: 'ai_translation_prompt', label: 'AI翻译提示词'},
+                                ].map(t => `
+                                    <button @click="activeConfigTab = '${t.key}'; loadConfig()"
+                                            :class="{'text-cyan-400 border-b-2 border-cyan-400': activeConfigTab === '${t.key}'}"
+                                            class="px-4 py-2 text-sm hover:text-gray-300 transition-colors">
+                                        ${t.label}
+                                    </button>
+                                `).join('')}
+                            </div>
+                            
+                            <!-- 编辑器 -->
+                            <div class="card p-4">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="font-semibold" x-text="activeConfigTab"></h3>
+                                    <div class="flex gap-2">
+                                        <button @click="saveConfig()" class="btn-primary">保存</button>
+                                        <button @click="showBackupModal = true" class="btn-secondary">备份管理</button>
+                                    </div>
+                                </div>
+                                
+                                <textarea x-model="configContent" 
+                                          class="code-editor w-full p-4 rounded-lg border border-gray-700 focus:border-cyan-500 focus:outline-none resize-none" style="height: calc(100vh - 380px);"
+                                          placeholder="配置文件内容..."></textarea>
+                                
+                                <!-- YAML 解析预览 -->
+                                <div x-show="configParsed && activeConfigTab === 'config_yaml'" class="mt-4 p-4 bg-gray-800/50 rounded-lg">
+                                    <h4 class="text-sm font-medium mb-2">配置概览</h4>
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                        <div class="p-2 bg-gray-800 rounded">
+                                            <span class="text-gray-400">时区:</span>
+                                            <span x-text="configParsed?.app?.timezone || '-'" class="ml-1"></span>
+                                        </div>
+                                        <div class="p-2 bg-gray-800 rounded">
+                                            <span class="text-gray-400">调度预设:</span>
+                                            <span x-text="configParsed?.schedule?.preset || '-'" class="ml-1"></span>
+                                        </div>
+                                        <div class="p-2 bg-gray-800 rounded">
+                                            <span class="text-gray-400">报告模式:</span>
+                                            <span x-text="configParsed?.report?.mode || '-'" class="ml-1"></span>
+                                        </div>
+                                        <div class="p-2 bg-gray-800 rounded">
+                                            <span class="text-gray-400">筛选策略:</span>
+                                            <span x-text="configParsed?.filter?.method || '-'" class="ml-1"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 备份管理弹窗 -->
+                        <div x-show="showBackupModal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" style="display: none;">
+                            <div class="card p-6 w-full max-w-lg" @click.away="showBackupModal = false">
+                                <h3 class="text-lg font-semibold mb-4">备份管理</h3>
+                                <div class="max-h-64 overflow-y-auto space-y-2">
+                                    <template x-for="backup in configBackups" :key="backup.timestamp">
+                                        <div class="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
+                                            <div class="text-sm">
+                                                <div x-text="backup.timestamp"></div>
+                                                <div class="text-xs text-gray-500" x-text="(backup.size / 1024).toFixed(1) + ' KB'"></div>
+                                            </div>
+                                            <button @click="restoreBackup(backup.filename)" class="text-cyan-400 hover:text-cyan-300 text-sm">
+                                                恢复
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <div x-show="!configBackups.length" class="text-center text-gray-500 py-4">
+                                        暂无备份
+                                    </div>
+                                </div>
+                                <button @click="showBackupModal = false" class="btn-secondary w-full mt-4">关闭</button>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderSchedule() {
+                    if (!this.scheduleData) return '<div class="text-center py-12 text-gray-500">加载中...</div>';
+                    
+                    const s = this.scheduleData;
+                    const actionColors = { collect: 'bg-blue-500/20 text-blue-400', analyze: 'bg-purple-500/20 text-purple-400', push: 'bg-green-500/20 text-green-400' };
+                    
+                    return `
+                        <div class="space-y-4">
+                            <!-- 当前状态 -->
+                            <div class="card p-4">
+                                <h3 class="text-lg font-semibold mb-4">当前状态</h3>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-xs text-gray-400">当前时间</div>
+                                        <div class="text-xl font-mono" x-text="scheduleData.current_time"></div>
+                                    </div>
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-xs text-gray-400">当前时段</div>
+                                        <div class="text-lg" x-text="scheduleData.period?.name || '默认配置'"></div>
+                                    </div>
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-xs text-gray-400">执行动作</div>
+                                        <div class="flex gap-2 mt-1">
+                                            <span class="px-2 py-1 rounded text-xs ${s.actions.collect ? actionColors.collect : 'bg-gray-700 text-gray-500'}">采集</span>
+                                            <span class="px-2 py-1 rounded text-xs ${s.actions.analyze ? actionColors.analyze : 'bg-gray-700 text-gray-500'}">分析</span>
+                                            <span class="px-2 py-1 rounded text-xs ${s.actions.push ? actionColors.push : 'bg-gray-700 text-gray-500'}">推送</span>
+                                        </div>
+                                    </div>
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-xs text-gray-400">下一时段</div>
+                                        <div class="text-sm" x-text="scheduleData.next_period ? scheduleData.next_period.name + ' (' + scheduleData.next_period.start + ')' : '无'"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 24h 时间轴 -->
+                            <div class="card p-4">
+                                <h3 class="text-lg font-semibold mb-4">24小时时间轴</h3>
+                                <div class="relative h-12 bg-gray-800 rounded-lg overflow-hidden">
+                                    ${this.renderTimelineBars(s.timeline)}
+                                    <!-- 当前时间指示器 -->
+                                    <div class="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10" 
+                                         :style="'left: ' + (parseInt(scheduleData.current_time?.split(':')[0]) / 24 * 100) + '%'"></div>
+                                </div>
+                                <div class="flex justify-between text-xs text-gray-500 mt-2">
+                                    <span>00:00</span>
+                                    <span>06:00</span>
+                                    <span>12:00</span>
+                                    <span>18:00</span>
+                                    <span>23:59</span>
+                                </div>
+                            </div>
+                            
+                            <!-- 今日执行记录 -->
+                            <div class="card p-4">
+                                <h3 class="text-lg font-semibold mb-4">今日执行记录</h3>
+                                <div class="space-y-2">
+                                    <template x-for="exec in scheduleData.executions" :key="exec.executed_at">
+                                        <div class="flex items-center gap-4 p-3 bg-gray-800/30 rounded-lg">
+                                            <span class="text-sm text-gray-400" x-text="new Date(exec.executed_at).toLocaleTimeString('zh-CN')"></span>
+                                            <span class="px-2 py-1 rounded text-xs bg-gray-700" x-text="exec.period_key"></span>
+                                            <span class="px-2 py-1 rounded text-xs" 
+                                                  :class="{
+                                                      'bg-blue-500/20 text-blue-400': exec.action === 'collect',
+                                                      'bg-purple-500/20 text-purple-400': exec.action === 'analyze',
+                                                      'bg-green-500/20 text-green-400': exec.action === 'push'
+                                                  }"
+                                                  x-text="exec.action"></span>
+                                        </div>
+                                    </template>
+                                    <div x-show="!scheduleData.executions?.length" class="text-center text-gray-500 py-4">
+                                        今日暂无执行记录
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderTimelineBars(timeline) {
+                    if (!timeline?.periods || !timeline?.day_plans) return '';
+                    
+                    const dayPlan = timeline.day_plans[timeline.week_map[new Date().getDay() || 7]];
+                    if (!dayPlan) return '';
+                    
+                    const colors = ['bg-blue-500', 'bg-purple-500', 'bg-green-500', 'bg-yellow-500', 'bg-pink-500'];
+                    let html = '';
+                    
+                    dayPlan.periods.forEach((periodKey, idx) => {
+                        const period = timeline.periods[periodKey];
+                        if (!period) return;
+                        
+                        const start = parseInt(period.start.split(':')[0]) + parseInt(period.start.split(':')[1]) / 60;
+                        const end = parseInt(period.end.split(':')[0]) + parseInt(period.end.split(':')[1]) / 60;
+                        const left = (start / 24) * 100;
+                        const width = ((end - start + (end < start ? 24 : 0)) / 24) * 100;
+                        
+                        html += `<div class="timeline-bar absolute ${colors[idx % colors.length]}" style="left: ${left}%; width: ${width}%;" title="${period.name}">${period.name}</div>`;
+                    });
+                    
+                    return html;
+                },
+                
+                renderActions() {
+                    const actions = [
+                        { id: 'crawl', name: '触发采集', desc: '立即执行热榜和 RSS 采集', icon: '📥', color: 'blue' },
+                        { id: 'analyze', name: '触发分析', desc: '执行 AI 分析', icon: '🧠', color: 'purple' },
+                        { id: 'push', name: '触发推送', desc: '发送推送通知', icon: '📤', color: 'green' },
+                        { id: 'sync', name: '同步远程', desc: '同步远程存储数据', icon: '☁️', color: 'cyan' },
+                    ];
+                    
+                    return `
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${actions.map(a => `
+                                <div class="card p-4">
+                                    <div class="flex items-start gap-4">
+                                        <div class="w-12 h-12 rounded-lg bg-${a.color}-500/20 flex items-center justify-center text-2xl">
+                                            ${a.icon}
+                                        </div>
+                                        <div class="flex-1">
+                                            <h3 class="font-semibold">${a.name}</h3>
+                                            <p class="text-sm text-gray-400">${a.desc}</p>
+                                            
+                                            <div x-show="runningActions['${a.id}']" class="mt-3">
+                                                <div class="log-output h-32" x-html="logs['${a.id}']?.join('<br>') || ''"></div>
+                                            </div>
+                                            
+                                            <button @click="runAction('${a.id}')" 
+                                                    :disabled="runningActions['${a.id}']"
+                                                    class="btn-primary mt-3 disabled:opacity-50">
+                                                <span x-show="!runningActions['${a.id}']">执行</span>
+                                                <span x-show="runningActions['${a.id}']">运行中...</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                            
+                            <!-- 测试通知 -->
+                            <div class="card p-4 md:col-span-2">
+                                <div class="flex items-start gap-4">
+                                    <div class="w-12 h-12 rounded-lg bg-yellow-500/20 flex items-center justify-center text-2xl">
+                                        🔔
+                                    </div>
+                                    <div class="flex-1">
+                                        <h3 class="font-semibold">测试通知</h3>
+                                        <p class="text-sm text-gray-400">发送测试消息到指定渠道</p>
+                                        
+                                        <div class="flex gap-2 mt-3">
+                                            <select x-model="testChannel" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
+                                                <option value="">选择渠道</option>
+                                                <option value="feishu">飞书</option>
+                                                <option value="dingtalk">钉钉</option>
+                                                <option value="wework">企业微信</option>
+                                                <option value="telegram">Telegram</option>
+                                                <option value="email">邮件</option>
+                                                <option value="ntfy">ntfy</option>
+                                                <option value="bark">Bark</option>
+                                                <option value="slack">Slack</option>
+                                            </select>
+                                            <input type="text" x-model="testMessage" placeholder="测试消息内容" 
+                                                   class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 flex-1">
+                                            <button @click="sendTestNotification()" class="btn-primary">发送</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                renderSystem() {
+                    if (!this.systemData) return '<div class="text-center py-12 text-gray-500">加载中...</div>';
+                    
+                    const s = this.systemData;
+                    
+                    return `
+                        <div class="space-y-4">
+                            <div class="card p-4">
+                                <h3 class="text-lg font-semibold mb-4">版本信息</h3>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-gray-400">TrendRadar</div>
+                                        <div class="font-mono" x-text="systemData.version"></div>
+                                    </div>
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-gray-400">MCP</div>
+                                        <div class="font-mono" x-text="systemData.version_mcp"></div>
+                                    </div>
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-gray-400">Python</div>
+                                        <div class="font-mono truncate" x-text="systemData.python_version?.split(' ')[0]"></div>
+                                    </div>
+                                    <div class="p-3 bg-gray-800/50 rounded-lg">
+                                        <div class="text-gray-400">运行环境</div>
+                                        <div class="font-mono" x-text="systemData.environment"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="card p-4">
+                                <h3 class="text-lg font-semibold mb-4">存储信息</h3>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between p-2 bg-gray-800/30 rounded">
+                                        <span class="text-gray-400">磁盘占用</span>
+                                        <span x-text="(systemData.disk_usage / 1024 / 1024).toFixed(2) + ' MB'"></span>
+                                    </div>
+                                    <template x-for="db in systemData.db_files" :key="db.path">
+                                        <div class="flex justify-between p-2 bg-gray-800/30 rounded text-sm">
+                                            <span class="text-gray-400 truncate" x-text="db.path"></span>
+                                            <span x-text="(db.size / 1024).toFixed(1) + ' KB'"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            
+                            <div class="card p-4">
+                                <h3 class="text-lg font-semibold mb-4">配置文件</h3>
+                                <div class="space-y-2">
+                                    <template x-for="(time, name) in systemData.config_files" :key="name">
+                                        <div class="flex justify-between p-2 bg-gray-800/30 rounded text-sm">
+                                            <span class="text-gray-400" x-text="name"></span>
+                                            <span x-text="new Date(time).toLocaleString('zh-CN')"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                // ========== 操作方法 ==========
+                async runAction(actionType) {
+                    try {
+                        const res = await this.apiCall(`/api/actions/${actionType}`, {
+                            method: 'POST',
+                            body: JSON.stringify({})
+                        });
+                        
+                        if (res.success) {
+                            this.runningActions[actionType] = true;
+                            this.logs[actionType] = ['开始执行...'];
+                            this.connectLogStream(actionType, res.data.action_id);
+                        } else {
+                            alert(res.error || '执行失败');
+                        }
+                    } catch (e) {
+                        alert('执行失败: ' + e.message);
+                    }
+                },
+                
+                connectLogStream(actionType, actionId) {
+                    const eventSource = new EventSource(`/api/actions/${actionId}/logs`);
+                    
+                    eventSource.onmessage = (e) => {
+                        const data = JSON.parse(e.data);
+                        
+                        if (data.done) {
+                            eventSource.close();
+                            this.runningActions[actionType] = false;
+                            if (data.exit_code !== 0) {
+                                this.logs[actionType].push(`执行结束，退出码: ${data.exit_code}`);
+                            } else {
+                                this.logs[actionType].push('执行完成');
+                            }
+                            return;
+                        }
+                        
+                        if (!this.logs[actionType]) this.logs[actionType] = [];
+                        this.logs[actionType].push(`[${data.ts}] [${data.level}] ${data.line}`);
+                    };
+                    
+                    eventSource.onerror = () => {
+                        eventSource.close();
+                        this.runningActions[actionType] = false;
+                    };
+                },
+                
+                async saveConfig() {
+                    try {
+                        const res = await this.apiCall(`/api/config/${this.activeConfigTab}`, {
+                            method: 'PUT',
+                            body: JSON.stringify({ content: this.configContent })
+                        });
+                        
+                        if (res.success) {
+                            alert('保存成功');
+                            this.loadConfig();
+                        } else {
+                            alert('保存失败: ' + res.error);
+                        }
+                    } catch (e) {
+                        alert('保存失败: ' + e.message);
+                    }
+                },
+                
+                async restoreBackup(filename) {
+                    if (!confirm('确定要恢复此备份吗？当前配置将被备份。')) return;
+                    
+                    try {
+                        const res = await this.apiCall(`/api/config/${this.activeConfigTab}/restore`, {
+                            method: 'POST',
+                            body: JSON.stringify({ backup_filename: filename })
+                        });
+                        
+                        if (res.success) {
+                            alert('恢复成功');
+                            this.loadConfig();
+                        } else {
+                            alert('恢复失败: ' + res.error);
+                        }
+                    } catch (e) {
+                        alert('恢复失败: ' + e.message);
+                    }
+                },
+                
+                async sendTestNotification() {
+                    if (!this.testChannel) {
+                        alert('请选择渠道');
+                        return;
+                    }
+                    
+                    try {
+                        const res = await this.apiCall('/api/actions/test_notification', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                channel: this.testChannel,
+                                message: this.testMessage || '这是一条测试消息'
+                            })
+                        });
+                        
+                        if (res.success) {
+                            alert('测试消息已发送');
+                        } else {
+                            alert('发送失败: ' + res.error);
+                        }
+                    } catch (e) {
+                        alert('发送失败: ' + e.message);
+                    }
+                },
+                
+                async showRankHistory(newsId) {
+                    try {
+                        const res = await this.apiCall(`/api/news/${newsId}/rank-history`);
+                        if (res.success && res.data.history.length > 0) {
+                            const history = res.data.history;
+                            const labels = history.map(h => h.crawl_time.slice(11, 16));
+                            const data = history.map(h => h.rank);
+                            
+                            // 创建弹窗显示图表
+                            const modal = document.createElement('div');
+                            modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+                            modal.innerHTML = `
+                                <div class="card p-6 w-full max-w-2xl">
+                                    <h3 class="text-lg font-semibold mb-4">排名历史</h3>
+                                    <canvas id="rankChart" height="200"></canvas>
+                                    <button onclick="this.closest('.fixed').remove()" class="btn-secondary w-full mt-4">关闭</button>
+                                </div>
+                            `;
+                            document.body.appendChild(modal);
+                            
+                            new Chart(document.getElementById('rankChart'), {
+                                type: 'line',
+                                data: {
+                                    labels: labels,
+                                    datasets: [{
+                                        label: '排名',
+                                        data: data,
+                                        borderColor: '#00e5ff',
+                                        tension: 0.4,
+                                        fill: false
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    scales: {
+                                        y: {
+                                            reverse: true,
+                                            min: 1,
+                                            grid: { color: '#1f2937' },
+                                            ticks: { color: '#9ca3af' }
+                                        },
+                                        x: {
+                                            grid: { color: '#1f2937' },
+                                            ticks: { color: '#9ca3af' }
+                                        }
+                                    },
+                                    plugins: {
+                                        legend: { labels: { color: '#9ca3af' } }
+                                    }
+                                }
+                            });
+                        } else {
+                            alert('暂无排名历史数据');
+                        }
+                    } catch (e) {
+                        alert('获取排名历史失败');
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
